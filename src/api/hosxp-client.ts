@@ -2,7 +2,7 @@ import type { SessionConfig, SessionValidationResponse } from '../types/session'
 import { SESSION_CONFIG } from '../config/constants';
 import { minifySql } from '../utils/sql';
 
-const HOSXP_PASTE_URL = '/hosxp-api/phapi/PasteJSON';
+const HOSXP_PASTE_URL = 'https://hosxp.net/phapi/PasteJSON';
 
 export async function validateSession(sessionId: string): Promise<SessionConfig> {
   const url = `${HOSXP_PASTE_URL}?Action=GET&code=${encodeURIComponent(sessionId)}`;
@@ -56,19 +56,19 @@ export async function querySql<T>(
   retries = 3,
 ): Promise<T[]> {
   const minified = minifySql(sql);
-  const queryPath = `/api/sql?sql=${encodeURIComponent(minified)}&app=${SESSION_CONFIG.appIdentifier}`;
-  const url = `/bms-api${queryPath}`;
+  const url = `${config.apiUrl}/api/sql`;
 
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const res = await fetch(url, {
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${config.apiAuthKey}`,
           'Content-Type': 'application/json',
-          'X-BMS-Target': config.apiUrl,
         },
+        body: JSON.stringify({ sql: minified, app: SESSION_CONFIG.appIdentifier }),
       });
 
       if (res.status === 401) {
