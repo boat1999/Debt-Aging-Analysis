@@ -27,9 +27,17 @@ export async function validateSession(sessionId: string): Promise<SessionConfig>
     }
     throw err;
   }
+
+  if (!res.ok) {
+    throw new Error(`ดึงข้อมูล Session ล้มเหลว (HTTP ${res.status})`);
+  }
+
   const data: SessionValidationResponse = await res.json();
 
   if (data.MessageCode !== 200) {
+    if (data.MessageCode === 500) {
+      throw new Error('Session หมดอายุ กรุณา Login ใหม่ที่ HOSxP Desktop Application');
+    }
     throw new Error(data.Message || 'Session หมดอายุ กรุณา Login ใหม่ที่ HOSxP');
   }
 
@@ -42,30 +50,44 @@ export async function validateSession(sessionId: string): Promise<SessionConfig>
     throw new Error('Session หมดอายุแล้ว กรุณา Login ใหม่ที่ HOSxP Desktop Application');
   }
 
-  const keyValue = result.key_value;
   const userInfo = result.user_info;
+  const apiUrl = userInfo?.bms_url;
 
-  const apiUrl =
-    (typeof keyValue === 'object' ? keyValue?.['hosxp.api_url'] : undefined) ??
-    userInfo?.['hosxp.api_url'] ??
-    userInfo?.bms_url;
-
-  const apiAuthKey =
-    (typeof keyValue === 'object' ? keyValue?.['hosxp.api_auth_key'] : undefined) ??
-    userInfo?.['hosxp.api_auth_key'] ??
-    userInfo?.bms_session_code ??
-    (typeof keyValue === 'string' ? keyValue : undefined);
-
-  if (!apiUrl || !apiAuthKey) {
-    throw new Error('ไม่สามารถดึงข้อมูล API จาก Session ได้');
+  let apiAuthKey: string | undefined;
+  let tokenSource: string;
+  if (userInfo?.bms_session_code) {
+    apiAuthKey = userInfo.bms_session_code;
+    tokenSource = 'user_info.bms_session_code';
+  } else if (result.key_value) {
+    apiAuthKey = result.key_value;
+    tokenSource = 'result.key_value';
+  } else {
+    apiAuthKey = result.auth_key;
+    tokenSource = 'result.auth_key';
   }
+
+  if (!apiUrl) {
+    throw new Error('ไม่พบ bms_url ใน session กรุณา Login ใหม่');
+  }
+  if (!apiAuthKey) {
+    throw new Error('ไม่พบ session token กรุณา Login ใหม่');
+  }
+
+  console.info('[hosxp-client] session validated', {
+    apiUrl,
+    tokenSource,
+    tokenPrefix: apiAuthKey.slice(0, 8) + '...',
+    tokenLength: apiAuthKey.length,
+    bmsDatabaseName: userInfo?.bms_database_name,
+    bmsDatabaseType: userInfo?.bms_database_type,
+  });
 
   return {
     apiUrl,
     apiAuthKey,
     userInfo: {
-      fullname: userInfo?.fullname ?? userInfo?.name ?? 'Unknown',
-      hospital_name: userInfo?.hospital_name ?? userInfo?.location ?? 'Unknown',
+      fullname: userInfo?.name ?? 'Unknown',
+      hospital_name: userInfo?.location ?? 'Unknown',
     },
   };
 }
@@ -73,10 +95,13 @@ export async function validateSession(sessionId: string): Promise<SessionConfig>
 export async function querySql<T>(
   config: SessionConfig,
   sql: string,
-  retries = 3,
+  retries = 2,
 ): Promise<T[]> {
   const minified = minifySql(sql);
-  const url = `${config.apiUrl}/api/sql`;
+  const app = SESSION_CONFIG.appIdentifier;
+  const url =
+    `${config.apiUrl}/api/sql?sql=${encodeURIComponent(minified)}` +
+    `&app=${encodeURIComponent(app)}`;
 
   let lastError: Error | null = null;
 
@@ -85,12 +110,10 @@ export async function querySql<T>(
       const res = await fetchWithTimeout(
         url,
         {
-          method: 'POST',
+          method: 'GET',
           headers: {
             Authorization: `Bearer ${config.apiAuthKey}`,
-            'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ sql: minified, app: SESSION_CONFIG.appIdentifier }),
         },
         QUERY_TIMEOUT_MS,
       );
@@ -98,11 +121,28 @@ export async function querySql<T>(
       if (res.status === 401) {
         throw new Error('Auth Key หมดอายุ กรุณา Login ใหม่');
       }
+      if (res.status === 501) {
+        let responseBody = '';
+        try { responseBody = await res.text(); } catch { /* ignore */ }
+        console.error('[hosxp-client] 501 response', {
+          url,
+          app,
+          tokenPrefix: config.apiAuthKey.slice(0, 8) + '...',
+          responseBody,
+        });
+        throw new Error('Session ไม่ได้รับสิทธิเข้าถึง API กรุณา Login ใหม่ที่ HOSxP Desktop');
+      }
       if (res.status === 502) {
         throw new Error('ปัญหาการเชื่อมต่อ Tunnel');
       }
+      if (!res.ok) {
+        throw new Error(`SQL API ตอบกลับ HTTP ${res.status}`);
+      }
 
       const data = await res.json();
+      if (data.MessageCode === 500 || data.MessageCode === 501) {
+        throw new Error('Session ไม่ได้รับสิทธิเข้าถึง API กรุณา Login ใหม่ที่ HOSxP Desktop');
+      }
       if (data.MessageCode !== 200) {
         throw new Error(data.Message || 'Query failed');
       }
@@ -111,10 +151,18 @@ export async function querySql<T>(
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         lastError = new Error('Query ใช้เวลานานเกินไป');
+      } else if (error instanceof TypeError && /fetch|network|CORS/i.test(error.message)) {
+        lastError = new Error(`เชื่อมต่อ API ไม่ได้ (${url}) อาจติด CORS หรือเครือข่าย`);
       } else {
         lastError = error instanceof Error ? error : new Error(String(error));
       }
-      if (error instanceof Error && error.message === 'Auth Key หมดอายุ กรุณา Login ใหม่') {
+      console.warn(`[hosxp-client] attempt ${attempt + 1}/${retries} failed:`, lastError.message);
+
+      const fatalMessages = [
+        'Auth Key หมดอายุ กรุณา Login ใหม่',
+        'Session ไม่ได้รับสิทธิเข้าถึง API กรุณา Login ใหม่ที่ HOSxP Desktop',
+      ];
+      if (error instanceof Error && fatalMessages.includes(error.message)) {
         throw error;
       }
       if (attempt < retries - 1) {

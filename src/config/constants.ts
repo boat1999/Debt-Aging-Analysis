@@ -25,7 +25,7 @@ export const ALERT_THRESHOLDS = {
 export const QUERY_CONFIG = {
   staleTime: 5 * 60 * 1000,       // 5 minutes
   refetchInterval: 5 * 60 * 1000,  // 5 minutes
-  retry: 3,
+  retry: 0,                        // querySql has its own retry loop; avoid double-retry hang
   gcTime: 10 * 60 * 1000,         // 10 minutes
 } as const;
 
@@ -38,5 +38,5 @@ export const SESSION_CONFIG = {
   cookieName: 'bms-session-id',
   cookieExpiry: 7,                  // days
   urlParamName: 'bms-session-id',
-  appIdentifier: 'debt-aging-analysis',
+  appIdentifier: 'BMS.Dashboard.React',
 } as const;

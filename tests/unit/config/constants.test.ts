@@ -50,7 +50,7 @@ describe('QUERY_CONFIG', () => {
     expect(QUERY_CONFIG.refetchInterval).toBe(5 * 60 * 1000);
   });
 
-  it('retry count is 3', () => {
-    expect(QUERY_CONFIG.retry).toBe(3);
+  it('retry is disabled (querySql handles its own retries)', () => {
+    expect(QUERY_CONFIG.retry).toBe(0);
   });
 });
