@@ -168,6 +168,8 @@ export function LoginPage({ onLogin, isLoading, error }: LoginPageProps) {
               </p>
             </div>
           </div>
+
+          <div className="login-version">v{__APP_VERSION__}</div>
         </div>
       </div>
     </div>

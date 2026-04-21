@@ -71,6 +71,19 @@ export function AppLayout({ children, userInfo, onLogout }: AppLayoutProps) {
           }}>
             BMS Debt Aging Analysis
           </span>
+          <span style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: 'var(--gold)',
+            padding: '2px 7px',
+            borderRadius: 5,
+            border: '1px solid rgba(201,169,110,0.3)',
+            background: 'rgba(201,169,110,0.08)',
+            letterSpacing: 0.5,
+            lineHeight: 1.4,
+          }}>
+            v{__APP_VERSION__}
+          </span>
         </div>
 
         {/* Right: Hospital + Theme + User + Logout */}
