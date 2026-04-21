@@ -3,10 +3,30 @@ import { SESSION_CONFIG } from '../config/constants';
 import { minifySql } from '../utils/sql';
 
 const HOSXP_PASTE_URL = 'https://hosxp.net/phapi/PasteJSON';
+const SESSION_TIMEOUT_MS = 30_000;
+const QUERY_TIMEOUT_MS = 60_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export async function validateSession(sessionId: string): Promise<SessionConfig> {
   const url = `${HOSXP_PASTE_URL}?Action=GET&code=${encodeURIComponent(sessionId)}`;
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {}, SESSION_TIMEOUT_MS);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('ตรวจสอบ Session หมดเวลา กรุณาลองใหม่');
+    }
+    throw err;
+  }
   const data: SessionValidationResponse = await res.json();
 
   if (data.MessageCode !== 200) {
@@ -62,14 +82,18 @@ export async function querySql<T>(
 
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${config.apiAuthKey}`,
-          'Content-Type': 'application/json',
+      const res = await fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${config.apiAuthKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ sql: minified, app: SESSION_CONFIG.appIdentifier }),
         },
-        body: JSON.stringify({ sql: minified, app: SESSION_CONFIG.appIdentifier }),
-      });
+        QUERY_TIMEOUT_MS,
+      );
 
       if (res.status === 401) {
         throw new Error('Auth Key หมดอายุ กรุณา Login ใหม่');
@@ -85,9 +109,13 @@ export async function querySql<T>(
 
       return data.data as T[];
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        lastError = new Error('Query ใช้เวลานานเกินไป');
+      } else {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
       if (error instanceof Error && error.message === 'Auth Key หมดอายุ กรุณา Login ใหม่') {
-        throw error; // Don't retry auth errors
+        throw error;
       }
       if (attempt < retries - 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));

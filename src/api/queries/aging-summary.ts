@@ -1,33 +1,36 @@
 import type { FilterState } from '../../types/debt';
-
-function escapeSql(value: string): string {
-  return value.replace(/'/g, "''");
-}
+import { toFiniteNumber, validateIsoDate, validatePttypeCode } from '../../utils/sql';
 
 export function buildAgingSummarySql(filters?: FilterState): string {
   const whereConditions = ['d.paid IS NULL'];
 
   if (filters) {
     if (filters.dateRange) {
-      whereConditions.push(`d.debt_date BETWEEN '${filters.dateRange[0]}' AND '${filters.dateRange[1]}'`);
+      const start = validateIsoDate(filters.dateRange[0]);
+      const end = validateIsoDate(filters.dateRange[1]);
+      if (start && end) {
+        whereConditions.push(`d.debt_date BETWEEN '${start}' AND '${end}'`);
+      }
     }
     if (filters.pttypes.length > 0) {
-      const list = filters.pttypes.map((p) => `'${escapeSql(p)}'`).join(',');
-      whereConditions.push(`d.pttype IN (${list})`);
+      const list = filters.pttypes
+        .map((p) => validatePttypeCode(p))
+        .filter((p): p is string => p !== null)
+        .map((p) => `'${p}'`)
+        .join(',');
+      if (list) whereConditions.push(`d.pttype IN (${list})`);
     }
     if (filters.arStatus === 'transferred') {
       whereConditions.push(`d.ar_transfer = 'Y'`);
     } else if (filters.arStatus === 'pending') {
       whereConditions.push('d.ar_transfer IS NULL');
     }
-    if (filters.department !== 'all') {
-      whereConditions.push(`d.department = '${escapeSql(filters.department)}'`);
+    if (filters.department === 'OPD' || filters.department === 'IPD') {
+      whereConditions.push(`d.department = '${filters.department}'`);
     }
-    if (filters.claimStatus) {
-      whereConditions.push(`d.claim_status = '${escapeSql(filters.claimStatus)}'`);
-    }
-    if (filters.minAmount !== null && filters.minAmount > 0) {
-      whereConditions.push(`d.total_amount >= ${filters.minAmount}`);
+    const minAmount = toFiniteNumber(filters.minAmount);
+    if (minAmount !== null && minAmount > 0) {
+      whereConditions.push(`d.total_amount >= ${minAmount}`);
     }
   }
 

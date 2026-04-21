@@ -1,19 +1,20 @@
 import type { FilterState } from '../../types/debt';
-
-function escapeSql(value: string): string {
-  return value.replace(/'/g, "''");
-}
+import { validatePttypeCode } from '../../utils/sql';
 
 export function buildTrendSql(filters?: FilterState): string {
   const whereConditions = [`d.debt_date >= CURRENT_DATE - 365`];
 
   if (filters) {
     if (filters.pttypes.length > 0) {
-      const list = filters.pttypes.map((p) => `'${escapeSql(p)}'`).join(',');
-      whereConditions.push(`d.pttype IN (${list})`);
+      const list = filters.pttypes
+        .map((p) => validatePttypeCode(p))
+        .filter((p): p is string => p !== null)
+        .map((p) => `'${p}'`)
+        .join(',');
+      if (list) whereConditions.push(`d.pttype IN (${list})`);
     }
-    if (filters.department !== 'all') {
-      whereConditions.push(`d.department = '${escapeSql(filters.department)}'`);
+    if (filters.department === 'OPD' || filters.department === 'IPD') {
+      whereConditions.push(`d.department = '${filters.department}'`);
     }
   }
 

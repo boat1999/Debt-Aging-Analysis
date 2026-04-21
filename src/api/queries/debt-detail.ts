@@ -1,28 +1,35 @@
 import type { FilterState } from '../../types/debt';
 import { EXPORT_CONFIG } from '../../config/constants';
-
-function escapeSql(value: string): string {
-  return value.replace(/'/g, "''");
-}
+import { escapeLikePattern, validateIsoDate, validatePttypeCode } from '../../utils/sql';
 
 export function buildDebtDetailSql(pttype: string, filters?: FilterState): string {
-  const whereConditions = ['d.paid IS NULL', `d.pttype = '${escapeSql(pttype)}'`];
+  const validPttype = validatePttypeCode(pttype);
+  if (!validPttype) {
+    throw new Error('รหัสสิทธิไม่ถูกต้อง');
+  }
+  const whereConditions = ['d.paid IS NULL', `d.pttype = '${validPttype}'`];
 
   if (filters) {
     if (filters.dateRange) {
-      whereConditions.push(`d.debt_date BETWEEN '${filters.dateRange[0]}' AND '${filters.dateRange[1]}'`);
+      const start = validateIsoDate(filters.dateRange[0]);
+      const end = validateIsoDate(filters.dateRange[1]);
+      if (start && end) {
+        whereConditions.push(`d.debt_date BETWEEN '${start}' AND '${end}'`);
+      }
     }
     if (filters.arStatus === 'transferred') {
       whereConditions.push(`d.ar_transfer = 'Y'`);
     } else if (filters.arStatus === 'pending') {
       whereConditions.push('d.ar_transfer IS NULL');
     }
-    if (filters.department !== 'all') {
-      whereConditions.push(`d.department = '${escapeSql(filters.department)}'`);
+    if (filters.department === 'OPD' || filters.department === 'IPD') {
+      whereConditions.push(`d.department = '${filters.department}'`);
     }
     if (filters.searchText) {
-      const s = filters.searchText.replace(/'/g, "''");
-      whereConditions.push(`(d.hn LIKE '%${s}%' OR pt.fname LIKE '%${s}%' OR pt.lname LIKE '%${s}%')`);
+      const s = escapeLikePattern(filters.searchText);
+      whereConditions.push(
+        `(d.hn LIKE '%${s}%' ESCAPE '\\' OR pt.fname LIKE '%${s}%' ESCAPE '\\' OR pt.lname LIKE '%${s}%' ESCAPE '\\')`,
+      );
     }
   }
 

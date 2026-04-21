@@ -59,7 +59,6 @@ export interface FilterState {
   pttypes: string[];
   arStatus: ArStatusFilter;
   department: DepartmentFilter;
-  claimStatus: string | null;
   searchText: string;
   minAmount: number | null;
 }
@@ -69,7 +68,6 @@ export const DEFAULT_FILTERS: FilterState = {
   pttypes: [],
   arStatus: 'all',
   department: 'all',
-  claimStatus: null,
   searchText: '',
   minAmount: null,
 };

@@ -24,6 +24,8 @@ export function useSession(): UseSessionReturn {
       const config = await validateSession(sessionId);
       Cookies.set(SESSION_CONFIG.cookieName, sessionId, {
         expires: SESSION_CONFIG.cookieExpiry,
+        sameSite: 'strict',
+        secure: window.location.protocol === 'https:',
       });
       setSessionConfig(config);
     } catch (err) {
